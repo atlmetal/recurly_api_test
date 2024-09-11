@@ -1,17 +1,19 @@
 class TaxesController < ApplicationController
   def transform
-    tin_service.call
-
-    render json: tin_service.generate_response, status: :ok
-  rescue StandardError => error
-    render json: { valid: false, errors: [error.class], message: error.message }, status: :bad_request
+    render json: tin_service
   end
 
   private
 
   def tin_service
-    @tin_service ||= TaxIdentificationNumberService.new(
-      country_code: params['country_code'], identification_number: params['identification_number']
-    )
+    @tin_service ||= TaxIdentificationNumberService.call(permit_tin_params)
+  end
+
+  def permit_tin_params
+    params.require(:validation_params).permit(:country_code, :identification_number)
+  end
+
+  def permit_abn_params
+    params.require(:abn_params).permit(:country_code, :identification_number)
   end
 end

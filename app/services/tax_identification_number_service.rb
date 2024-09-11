@@ -1,76 +1,80 @@
-require "active_support/hash_with_indifferent_access"
-
 class TaxIdentificationNumberService < ApplicationService
-  def initialize(country_code:, identification_number:)
-    @country_code = country_code
-    @identification_number = identification_number
+  TIN_FORMATS = {
+    'AU' => {
+      'au_abn' => { regex: /\A\d{11}\z/, format: 'NN NNN NNN NNN', length: 11 },
+      'au_acn' => { regex: /\A\d{9}\z/, format: 'NNN NNN NNN', length: 9 }
+    },
+    'CA' => {
+      'ca_gst' => { regex: /\A\d{9}RT\d{5}\z/, format: 'NNNNNNNNNRT00001', length: 9 }
+    },
+    'IN' => {
+      'in_gst' => { regex: /\A\d{2}[A-Z]{5}\d{4}[A-Z]{1}\d{1}Z\d{1}\z/, format: 'NNXXXXXXXXXXNAN', length: 15 }
+    }
+  }.freeze
 
-    country_code_information
+  ERRORS = {
+    unsupported_country: I18n.t('tin_validations.errors.unsupported_country'),
+    invalid_format: I18n.t('tin_validations.errors.invalid_tin_format')
+  }.freeze
+
+  def initialize(params)
+    @country_code = params[:country_code]
+    @tin = params[:identification_number].gsub(/\s+/, "")
   end
-
-  COUNTRY_CODES = ActiveSupport::HashWithIndifferentAccess.new({
-    AU: [
-      {
-        country: 'Australia',
-        tin_type: 'au_abn',
-        tin_name: 'Australian Business Number',
-        length_validation: -> (str) { str.tr(' ', '').size == 11 },
-        regex: -> (str) { str.match?(/^\d{2} \d{3} \d{3} \d{3}$/) },
-        format: -> (str) { "#{str[0..1]} #{str[2..4]} #{str[5..7]} #{str[8..10]}" }
-      },
-      {
-        country: 'Australia',
-        tin_type: 'au_acn',
-        tin_name: 'Australian Company Number',
-        length_validation: -> (str) { str.tr(' ', '').size == 9 },
-        regex: -> (str) { str.match?(/^\d{3} \d{3} \d{3}$/) },
-        format: -> (str) { "#{str[0..2]} #{str[3..5]} #{str[6..8]}" }
-      }
-    ],
-    CA: [
-      {
-        country: 'Canada',
-        tin_type: 'ca_gst',
-        tin_name: 'Canada GST Number',
-        length_validation: -> (str) { str.gsub(/RT\d{5}$/, '').size == 9 },
-        regex: -> (str) { str.match?(/^\d{9}RT\d{5}$/) },
-        format: -> (str) { "#{str}RT00001" }
-      }
-    ],
-    IN: [
-      {
-        country: 'India',
-        tin_type: 'in_gst',
-        tin_name: 'Indian GST Number',
-        length_validation: -> (str) { str.size == 15 },
-        regex: -> (str) { str.match?(/^\d{2}[A-Za-z0-9]{10}\d[A-Za-z]\d$/) },
-        format: -> (str) { str }
-      }
-    ]
-  })
-
-  class CountryCodeNotFoundException < StandardError; end
-  class InvalidParametersException < StandardError; end
 
   def call
-    raise InvalidParametersException.new("Missing parameters") unless @identification_number && @country_code
+    return unsupported_country_response unless supported_country?
 
-    @formatted_identification = @identification_number if @country_code_information[:regex].call(@identification_number)
-
-    return if @formatted_identification 
-
-    @formatted_identification = @country_code_information[:format].call(@identification_number)
-  end
-
-  def generate_response
-    { valid: true, tin_type: @country_code_information[:tin_type], formatted_tin: @formatted_identification, errors: [] }
+    type, format_details = find_format_details
+    return validate_abn if type == 'au_abn'
+    
+    type ? valid_tin_response(type, format_details) : invalid_format_response
   end
 
   private
 
-  def country_code_information
-    @country_code_information = COUNTRY_CODES[@country_code.upcase].find { |cd| cd[:length_validation].call(@identification_number) }
+  def supported_country?
+    TIN_FORMATS.key?(@country_code)
+  end
 
-    raise CountryCodeNotFoundException.new("Country code not found: #{@country_code}") unless @country_code_information
+  def unsupported_country_response
+    { valid: false, errors: ERRORS[:unsupported_country] }
+  end
+
+  def find_format_details
+    TIN_FORMATS[@country_code].find do |type, details|
+      add_code if ca_gst_needs_code?(type)
+      tin_matches_format?(details[:regex])
+    end
+  end
+
+  def ca_gst_needs_code?(type)
+    type == 'ca_gst' && @tin.size == 9
+  end
+
+  def tin_matches_format?(regex)
+    @tin.match?(regex)
+  end
+
+  def validate_abn
+    @validate_abn ||= AbnValidatorService.call(@tin)
+  end
+
+  def valid_tin_response(type, format_details)
+    formatted_tin = format_tin(format_details[:format])
+    { valid: true, tin_type: type, formatted_tin: formatted_tin }
+  end
+
+  def invalid_format_response
+    { valid: false, errors: ERRORS[:invalid_format] }
+  end
+
+  def add_code
+    @tin += 'RT00001'
+  end
+
+  def format_tin(format)
+    index = 0
+    format.gsub(/[NXA]/) { @tin[index].tap { index += 1 } }
   end
 end
