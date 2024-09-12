@@ -35,3 +35,38 @@ bin/finish-interview.sh
 ### Thank You
 
 Thank you for your time completing this interview!
+
+### How to test API?
+
+run
+
+```
+rails server
+```
+
+then in another terminal window run
+
+```
+bin/abn_query_server.rb
+```
+
+Go to postman/insomnia and send a Get request 
+
+```
+localhost:8080/queryABN?abn=10000000000
+```
+
+you can try too via postman/insomnia Get request
+
+```
+http://localhost:3000/transform
+
+{
+  "validation_params": {
+    "country_code": "AU",
+    "identification_number": "10 120 000 004"
+  }
+}
+```
+
+
