@@ -12,8 +12,4 @@ class TaxesController < ApplicationController
   def permit_tin_params
     params.require(:validation_params).permit(:country_code, :identification_number)
   end
-
-  def permit_abn_params
-    params.require(:abn_params).permit(:country_code, :identification_number)
-  end
 end
